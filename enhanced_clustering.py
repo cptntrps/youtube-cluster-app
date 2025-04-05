@@ -233,12 +233,12 @@ def main():
     
     print(f"Enhanced clusters saved to: {enhanced_clusters_file}")
     
-    # Display cluster names
+    # Print cluster categories
     print("\nCluster Categories:")
-    if 'cluster_names' in clusters:
-        for cluster_label, cluster_name in sorted(clusters['cluster_names'].items(), key=lambda x: int(x[0]) if x[0].isdigit() else x[0]):
-            channel_count = len(clusters['channels'][cluster_label])
-            print(f"  Cluster {cluster_label}: {cluster_name} ({channel_count} channels)")
+    # Convert all cluster labels to strings for consistent sorting
+    cluster_items = [(str(k), v) for k, v in clusters['cluster_names'].items()]
+    for cluster_label, cluster_name in sorted(cluster_items, key=lambda x: int(x[0]) if x[0].isdigit() else float('-inf')):
+        print(f"Cluster {cluster_label}: {cluster_name}")
     
     # Generate and save visualization using the visualize module
     from clustering.visualize import generate_visualization
