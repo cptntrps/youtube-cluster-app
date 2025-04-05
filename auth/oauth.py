@@ -7,10 +7,14 @@ import pickle
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+import pathlib
 
 # If modifying these scopes, delete your token file
 SCOPES = ['https://www.googleapis.com/auth/youtube.readonly']
 TOKEN_FILE = 'token.pickle'
+# Get the base directory of the application
+BASE_DIR = pathlib.Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CLIENT_SECRETS_FILE = os.path.join(BASE_DIR, 'client_secrets.json')
 
 def authenticate():
     """
@@ -48,8 +52,9 @@ def authenticate():
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
             else:
-                # Fall back to client secrets file
-                flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
+                # Fall back to client secrets file with absolute path
+                print(f"Using client secrets from: {CLIENT_SECRETS_FILE}")
+                flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
             
             creds = flow.run_local_server(port=0)
         

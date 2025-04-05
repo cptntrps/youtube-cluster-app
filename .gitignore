@@ -20,10 +20,36 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment
-.env
+# Virtual Environment
 venv/
+env/
 ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+
+# Output files
+output/
+*.html
+*.json
+*.csv
+
+# Logs
+*.log
+
+# Test files
+test_imports.py
+
+# OS specific
+.DS_Store
+Thumbs.db
 
 # Authentication
 token.pickle
@@ -36,13 +62,4 @@ output/*.html
 output/*.npy
 
 # Jupyter
-.ipynb_checkpoints/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Mac
-.DS_Store 
+.ipynb_checkpoints/ 

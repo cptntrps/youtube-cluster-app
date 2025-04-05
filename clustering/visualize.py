@@ -8,6 +8,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from typing import Dict, List, Any
+from sklearn.preprocessing import StandardScaler
+import umap
 
 from data.store import load_clusters
 
@@ -73,92 +75,120 @@ def create_plotly_visualization(clusters, output_file):
     Returns:
         Path to the generated HTML file
     """
-    # Extract cluster information
-    if 'channels' not in clusters:
-        print("Error: Cluster data does not contain channel information")
-        return None
+    # Extract channel data and cluster assignments
+    channels = []
+    labels = []
+    embeddings = []
+    engagement_rates = []
+    subscriber_counts = []
+    video_counts = []
     
-    # Prepare data for scatter plot
-    data = []
+    for cluster_label, cluster_channels in clusters['channels'].items():
+        for channel in cluster_channels:
+            channels.append(channel)
+            labels.append(cluster_label)
+            embeddings.append(channel.get('metadata_features', []))
+            engagement_rates.append(float(channel.get('engagement_rate', 0)))
+            subscriber_counts.append(float(channel.get('subscriber_count', 0)))
+            video_counts.append(float(channel.get('video_count', 0)))
     
-    # Create a color scale
-    colors = px.colors.qualitative.Plotly
+    # Convert to numpy arrays
+    embeddings = np.array(embeddings)
+    labels = np.array(labels)
     
-    # Create a data trace for each cluster
-    for cluster_label, channels in clusters['channels'].items():
-        # Skip noise points (cluster -1) if present
-        if cluster_label == '-1':
-            marker_color = 'rgba(0, 0, 0, 0.1)'  # Transparent black for noise
-            marker_size = 5
-        else:
-            # Assign color from the palette (cycle through if needed)
-            color_idx = int(cluster_label) % len(colors)
-            marker_color = colors[color_idx]
-            marker_size = 8
-        
-        # Extract coordinates and labels
-        x_coords = [channel.get('x', 0) for channel in channels]
-        y_coords = [channel.get('y', 0) for channel in channels]
-        titles = [channel.get('title', 'Unknown') for channel in channels]
-        
-        # Create hover text
-        hover_texts = []
-        for channel in channels:
-            text = f"<b>{channel.get('title', 'Unknown')}</b><br>"
-            text += f"Subscribers: {channel.get('subscriber_count', 'N/A')}<br>"
-            text += f"Videos: {channel.get('video_count', 'N/A')}<br>"
-            
-            # Truncate description if too long
-            desc = channel.get('description', '')
-            if len(desc) > 100:
-                desc = desc[:97] + '...'
-            text += f"Description: {desc}"
-            
-            hover_texts.append(text)
-        
-        # Get cluster name if available, otherwise use cluster number
-        if 'cluster_names' in clusters and cluster_label in clusters['cluster_names']:
-            cluster_name = clusters['cluster_names'][cluster_label]
-        else:
-            cluster_name = f"Cluster {cluster_label}"
-        
-        # Create scatter trace for this cluster
-        trace = go.Scatter(
-            x=x_coords,
-            y=y_coords,
-            mode='markers',
-            marker=dict(
-                size=marker_size,
-                color=marker_color,
-                line=dict(width=1, color='DarkSlateGrey')
-            ),
-            text=hover_texts,
-            hoverinfo='text',
-            name=cluster_name
-        )
-        
-        data.append(trace)
+    # Normalize metrics for size and color scaling
+    scaler = StandardScaler()
+    engagement_scaled = scaler.fit_transform(np.array(engagement_rates).reshape(-1, 1)).flatten()
+    subscriber_scaled = np.log10(np.array(subscriber_counts) + 1)  # Log scale for better visualization
     
-    # Create figure layout
-    layout = go.Layout(
-        title="YouTube Channel Clusters by Category",
-        hovermode='closest',
-        xaxis=dict(title='Component 1'),
-        yaxis=dict(title='Component 2'),
-        showlegend=True,
-        legend=dict(
-            x=0,
-            y=1,
-            traceorder="normal",
-            font=dict(family="sans-serif", size=12, color="black"),
-            bgcolor="LightSteelBlue",
-            bordercolor="Black",
-            borderwidth=2
-        )
+    # Improve UMAP parameters for better separation
+    reducer = umap.UMAP(
+        n_neighbors=15,  # Increased for better global structure
+        min_dist=0.3,    # Increased for more spacing between points
+        metric='cosine', # Better for high-dimensional data
+        random_state=42
     )
     
-    # Create figure and write to HTML
-    fig = go.Figure(data=data, layout=layout)
+    # Reduce dimensionality
+    embedding_2d = reducer.fit_transform(embeddings)
+    
+    # Create hover text with channel information
+    hover_texts = []
+    for i, channel in enumerate(channels):
+        text = f"Channel: {channel.get('title', 'Unknown')}<br>"
+        text += f"Category: {clusters['cluster_names'].get(labels[i], 'Unknown')}<br>"
+        text += f"Subscribers: {int(channel.get('subscriber_count', 0)):,}<br>"
+        text += f"Videos: {int(channel.get('video_count', 0)):,}<br>"
+        text += f"Engagement Rate: {engagement_rates[i]:.3f}"
+        hover_texts.append(text)
+    
+    # Create scatter plot with improved styling
+    traces = []
+    
+    # Get unique cluster labels
+    unique_labels = sorted(set(labels))
+    
+    # Create color scale for engagement
+    engagement_colorscale = [
+        [0, 'rgb(100,100,100)'],    # Low engagement
+        [0.5, 'rgb(255,165,0)'],    # Medium engagement
+        [1, 'rgb(255,0,0)']         # High engagement
+    ]
+    
+    # Plot each cluster
+    for cluster_label in unique_labels:
+        mask = labels == cluster_label
+        
+        trace = go.Scatter(
+            x=embedding_2d[mask, 0],
+            y=embedding_2d[mask, 1],
+            mode='markers',
+            name=clusters['cluster_names'].get(str(cluster_label), f'Cluster {cluster_label}'),
+            marker=dict(
+                size=5 + subscriber_scaled[mask] * 2,  # Size based on subscribers
+                color=engagement_scaled[mask],         # Color based on engagement
+                colorscale=engagement_colorscale,
+                showscale=True,
+                colorbar=dict(title='Engagement Level'),
+                line=dict(width=1, color='white'),
+            ),
+            text=np.array(hover_texts)[mask],
+            hoverinfo='text',
+        )
+        traces.append(trace)
+    
+    # Create layout with improved styling
+    layout = go.Layout(
+        title='YouTube Channel Clusters by Category',
+        template='plotly_white',
+        hovermode='closest',
+        showlegend=True,
+        legend=dict(
+            title='Channel Categories',
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        margin=dict(l=50, r=50, t=50, b=50),
+        xaxis=dict(
+            title='Component 1',
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211,211,211,0.6)',
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title='Component 2',
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211,211,211,0.6)',
+            zeroline=False,
+        ),
+    )
+    
+    # Create figure and save
+    fig = go.Figure(data=traces, layout=layout)
     fig.write_html(output_file)
     
     return output_file

@@ -1,20 +1,21 @@
 """
-YouTube subscription fetching module
+Enhanced YouTube subscription fetching module with additional data collection
 """
 
 import time
 from typing import Dict, List, Any
+from datetime import datetime, timedelta
 
 
 def fetch_all_subscriptions(youtube_client) -> List[Dict[str, Any]]:
     """
-    Fetches all subscriptions from the authenticated YouTube account
+    Fetches all subscriptions from the authenticated YouTube account with enhanced data
     
     Args:
         youtube_client: Authenticated YouTube API client
         
     Returns:
-        List of subscription objects with channel info
+        List of subscription objects with enriched channel info
     """
     subscriptions = []
     next_page_token = None
@@ -42,7 +43,8 @@ def fetch_all_subscriptions(youtube_client) -> List[Dict[str, Any]]:
                 'title': item['snippet']['title'],
                 'description': item['snippet']['description'],
                 'published_at': item['snippet']['publishedAt'],
-                'thumbnail': item['snippet']['thumbnails']['default']['url']
+                'thumbnail': item['snippet']['thumbnails']['default']['url'],
+                'subscription_date': item['snippet']['publishedAt']  # When you subscribed
             }
             
             # Add to our list
@@ -64,7 +66,7 @@ def fetch_all_subscriptions(youtube_client) -> List[Dict[str, Any]]:
 
 def enrich_with_channel_data(youtube_client, subscriptions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Enriches subscription data with additional channel information
+    Enriches subscription data with additional channel information including recent videos and engagement metrics
     
     Args:
         youtube_client: Authenticated YouTube API client
@@ -82,7 +84,7 @@ def enrich_with_channel_data(youtube_client, subscriptions: List[Dict[str, Any]]
         
         # Request channel details
         channels_request = youtube_client.channels().list(
-            part="snippet,statistics,topicDetails",
+            part="snippet,statistics,topicDetails,brandingSettings,contentDetails",
             id=",".join(channel_ids)
         )
         channels_response = channels_request.execute()
@@ -104,8 +106,98 @@ def enrich_with_channel_data(youtube_client, subscriptions: List[Dict[str, Any]]
                 # Add topics if available
                 if 'topicDetails' in channel and 'topicCategories' in channel['topicDetails']:
                     sub['topics'] = channel['topicDetails']['topicCategories']
+                
+                # Add branding settings
+                if 'brandingSettings' in channel:
+                    branding = channel['brandingSettings']
+                    if 'channel' in branding:
+                        sub['keywords'] = branding['channel'].get('keywords', '').split('|')
+                        sub['country'] = branding['channel'].get('country', '')
+                        sub['default_language'] = branding['channel'].get('defaultLanguage', '')
+                
+                # Fetch recent videos and engagement metrics
+                sub.update(fetch_recent_videos_and_engagement(youtube_client, channel_id))
         
         # Respect YouTube API quota limits
         time.sleep(0.5)
     
     return subscriptions
+
+
+def fetch_recent_videos_and_engagement(youtube_client, channel_id: str) -> Dict[str, Any]:
+    """
+    Fetches recent videos and engagement metrics for a channel
+    
+    Args:
+        youtube_client: Authenticated YouTube API client
+        channel_id: YouTube channel ID
+        
+    Returns:
+        Dictionary containing recent video data and engagement metrics
+    """
+    try:
+        # Get recent videos (last 10)
+        videos_request = youtube_client.search().list(
+            part="snippet",
+            channelId=channel_id,
+            order="date",
+            type="video",
+            maxResults=10
+        )
+        videos_response = videos_request.execute()
+        
+        recent_videos = []
+        total_views = 0
+        total_likes = 0
+        total_comments = 0
+        
+        # Process each video
+        for item in videos_response.get('items', []):
+            video_id = item['id']['videoId']
+            
+            # Get video statistics
+            video_request = youtube_client.videos().list(
+                part="statistics,contentDetails",
+                id=video_id
+            )
+            video_response = video_request.execute()
+            
+            if video_response['items']:
+                video_data = video_response['items'][0]
+                stats = video_data['statistics']
+                
+                video_info = {
+                    'video_id': video_id,
+                    'title': item['snippet']['title'],
+                    'published_at': item['snippet']['publishedAt'],
+                    'views': int(stats.get('viewCount', 0)),
+                    'likes': int(stats.get('likeCount', 0)),
+                    'comments': int(stats.get('commentCount', 0)),
+                    'duration': video_data['contentDetails']['duration']
+                }
+                
+                recent_videos.append(video_info)
+                total_views += video_info['views']
+                total_likes += video_info['likes']
+                total_comments += video_info['comments']
+        
+        # Calculate engagement metrics
+        engagement_metrics = {
+            'recent_videos': recent_videos,
+            'avg_views_per_video': total_views / len(recent_videos) if recent_videos else 0,
+            'avg_likes_per_video': total_likes / len(recent_videos) if recent_videos else 0,
+            'avg_comments_per_video': total_comments / len(recent_videos) if recent_videos else 0,
+            'engagement_rate': (total_likes + total_comments) / total_views if total_views > 0 else 0
+        }
+        
+        return engagement_metrics
+        
+    except Exception as e:
+        print(f"Error fetching video data for channel {channel_id}: {str(e)}")
+        return {
+            'recent_videos': [],
+            'avg_views_per_video': 0,
+            'avg_likes_per_video': 0,
+            'avg_comments_per_video': 0,
+            'engagement_rate': 0
+        }
