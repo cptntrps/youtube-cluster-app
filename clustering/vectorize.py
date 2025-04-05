@@ -55,22 +55,31 @@ def extract_metadata_features(channel: Dict) -> Dict:
     """
     features = {}
     
-    # Normalize subscriber count
-    sub_count = channel.get('subscriber_count', 0)
-    features['subscriber_count'] = np.log1p(sub_count)  # Log transform for better scaling
+    # Convert and normalize subscriber count
+    try:
+        sub_count = float(channel.get('subscriber_count', 0))
+        features['subscriber_count'] = float(np.log1p(sub_count))  # Log transform for better scaling
+    except (ValueError, TypeError):
+        features['subscriber_count'] = 0.0
     
-    # Normalize video count
-    video_count = channel.get('video_count', 0)
-    features['video_count'] = np.log1p(video_count)
+    # Convert and normalize video count
+    try:
+        video_count = float(channel.get('video_count', 0))
+        features['video_count'] = float(np.log1p(video_count))
+    except (ValueError, TypeError):
+        features['video_count'] = 0.0
     
     # Calculate engagement metrics
-    views = channel.get('view_count', 0)
-    features['views_per_video'] = views / max(video_count, 1)
+    try:
+        views = float(channel.get('view_count', 0))
+        features['views_per_video'] = views / max(video_count, 1)
+    except (ValueError, TypeError):
+        features['views_per_video'] = 0.0
     
     # Extract keywords from description
-    description = channel.get('description', '').lower()
-    features['has_social_links'] = bool(re.search(r'(twitter|facebook|instagram|tiktok)', description))
-    features['has_website'] = bool(re.search(r'(http|www)', description))
+    description = str(channel.get('description', '')).lower()
+    features['has_social_links'] = float(bool(re.search(r'(twitter|facebook|instagram|tiktok)', description)))
+    features['has_website'] = float(bool(re.search(r'(http|www)', description)))
     
     return features
 
