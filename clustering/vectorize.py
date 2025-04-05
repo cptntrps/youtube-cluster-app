@@ -6,6 +6,8 @@ import os
 from typing import Dict, List, Any, Tuple
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+import re
 
 
 def get_model():
@@ -47,39 +49,80 @@ def prepare_channel_text(channel: Dict[str, Any]) -> str:
     return text
 
 
-def vectorize_channels(channels: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], np.ndarray]:
+def extract_metadata_features(channel: Dict) -> Dict:
     """
-    Convert channel data to vector embeddings
-    
-    Args:
-        channels: List of channel dictionaries
-        
-    Returns:
-        Tuple of (channels with embeddings, embedding matrix)
+    Extract and normalize metadata features from a channel
     """
-    # Initialize the embedding model
-    model = get_model()
-    print(f"Using model: {model.get_sentence_embedding_dimension()}-dimensional embeddings")
+    features = {}
     
-    # Prepare text for each channel
+    # Normalize subscriber count
+    sub_count = channel.get('subscriber_count', 0)
+    features['subscriber_count'] = np.log1p(sub_count)  # Log transform for better scaling
+    
+    # Normalize video count
+    video_count = channel.get('video_count', 0)
+    features['video_count'] = np.log1p(video_count)
+    
+    # Calculate engagement metrics
+    views = channel.get('view_count', 0)
+    features['views_per_video'] = views / max(video_count, 1)
+    
+    # Extract keywords from description
+    description = channel.get('description', '').lower()
+    features['has_social_links'] = bool(re.search(r'(twitter|facebook|instagram|tiktok)', description))
+    features['has_website'] = bool(re.search(r'(http|www)', description))
+    
+    return features
+
+
+def vectorize_channels(channels: List[Dict]) -> Tuple[List[Dict], np.ndarray]:
+    """
+    Vectorize channel content and metadata
+    Returns enhanced channel data and combined embeddings
+    """
+    print(f"Vectorizing {len(channels)} channels...")
+    
+    # Load the sentence transformer model
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    print(f"Using model with {model.get_sentence_embedding_dimension()}-dimensional embeddings")
+    
+    # Prepare text for embedding
     texts = []
     for channel in channels:
-        channel_text = prepare_channel_text(channel)
-        texts.append(channel_text)
-        
-        # Store the prepared text for debugging
-        channel['vectorized_text'] = channel_text
+        # Combine title and description
+        text = f"{channel.get('title', '')} {channel.get('description', '')}"
+        texts.append(text)
     
-    # Convert texts to embeddings
-    embeddings = model.encode(texts, show_progress_bar=True)
+    # Generate embeddings in batches
+    batch_size = 32
+    embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        batch_embeddings = model.encode(batch, show_progress_bar=False)
+        embeddings.append(batch_embeddings)
+        print(f"Processed batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
     
-    # Add embeddings to channel data
+    # Combine all embeddings
+    content_embeddings = np.vstack(embeddings)
+    
+    # Extract metadata features
+    metadata_features = []
+    for channel in channels:
+        features = extract_metadata_features(channel)
+        metadata_features.append(list(features.values()))
+    
+    # Normalize metadata features
+    metadata_features = np.array(metadata_features)
+    metadata_features = (metadata_features - metadata_features.mean(axis=0)) / metadata_features.std(axis=0)
+    
+    # Combine content and metadata embeddings
+    combined_embeddings = np.hstack([content_embeddings, metadata_features])
+    
+    # Update channel data with metadata features
     for i, channel in enumerate(channels):
-        # We don't store the full embedding in the channel dict to keep it smaller
-        # Just store the index for reference
-        channel['embedding_index'] = i
+        channel['metadata_features'] = metadata_features[i].tolist()
     
-    return channels, embeddings
+    return channels, combined_embeddings
 
 
 def load_embeddings_from_file(filename):

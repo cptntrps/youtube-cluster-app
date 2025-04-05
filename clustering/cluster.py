@@ -8,92 +8,57 @@ import numpy as np
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
+import umap
+import hdbscan
 
 
-def create_clusters(embeddings, channels=None, n_clusters=10, algorithm='kmeans'):
+def create_clusters(embeddings: np.ndarray, channels: List[Dict], n_clusters: int = 10) -> Dict:
     """
-    Cluster the channel embeddings
-    
-    Args:
-        embeddings: numpy array of embeddings
-        channels: List of channel data (optional)
-        n_clusters: Number of clusters to create
-        algorithm: Clustering algorithm to use ('kmeans' or 'dbscan')
-        
-    Returns:
-        Dictionary with cluster model, labels, and metadata
+    Create clusters from channel embeddings using UMAP + HDBSCAN
+    Returns a dictionary with cluster assignments and metadata
     """
-    # Select clustering algorithm
-    if algorithm.lower() == 'dbscan':
-        # DBSCAN automatically determines the number of clusters
-        cluster_model = DBSCAN(eps=0.5, min_samples=5)
-    else:
-        # KMeans with specified number of clusters
-        cluster_model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    # Reduce dimensionality with UMAP
+    print("Reducing dimensionality with UMAP...")
+    umap_reducer = umap.UMAP(
+        n_neighbors=15,
+        min_dist=0.1,
+        n_components=2,
+        metric='cosine'
+    )
+    reduced_embeddings = umap_reducer.fit_transform(embeddings)
     
-    # Fit the model to the embeddings
-    cluster_model.fit(embeddings)
+    # Perform HDBSCAN clustering
+    print("Performing HDBSCAN clustering...")
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=5,
+        min_samples=3,
+        metric='euclidean',
+        cluster_selection_method='eom'
+    )
+    cluster_labels = clusterer.fit_predict(reduced_embeddings)
     
-    # Get cluster labels
-    if algorithm.lower() == 'dbscan':
-        labels = cluster_model.labels_
-        # Count the number of clusters (excluding noise points labeled as -1)
-        n_clusters_found = len(set(labels)) - (1 if -1 in labels else 0)
-        print(f"DBSCAN found {n_clusters_found} clusters")
-    else:
-        labels = cluster_model.labels_
-        centers = cluster_model.cluster_centers_
+    # Calculate cluster metrics
+    n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+    silhouette_avg = silhouette_score(reduced_embeddings, cluster_labels)
+    print(f"Number of clusters: {n_clusters}")
+    print(f"Silhouette Score: {silhouette_avg:.4f}")
     
-    # Calculate silhouette score if more than one cluster
-    if len(set(labels)) > 1 and min(labels) >= 0:
-        silhouette = silhouette_score(embeddings, labels)
-        print(f"Silhouette score: {silhouette:.4f}")
-    else:
-        silhouette = None
-        print("Skipping silhouette score calculation (not enough clusters)")
-    
-    # Create cluster output
+    # Organize channels by cluster
     clusters = {
-        'algorithm': algorithm,
-        'n_clusters': n_clusters if algorithm.lower() != 'dbscan' else n_clusters_found,
-        'silhouette_score': silhouette,
-        'labels': labels.tolist()
+        'channels': {},
+        'metadata': {
+            'n_clusters': n_clusters,
+            'silhouette_score': silhouette_avg,
+            'reduced_embeddings': reduced_embeddings.tolist()
+        }
     }
     
-    # Add dimensionality reduction for visualization
-    if embeddings.shape[1] > 2:
-        # Use PCA to reduce to 2D
-        pca = PCA(n_components=2)
-        reduced_data = pca.fit_transform(embeddings)
-        
-        # Add reduced coordinates
-        clusters['reduced_data'] = reduced_data.tolist()
-        clusters['explained_variance'] = pca.explained_variance_ratio_.tolist()
-    
-    # Add channel data to clusters if provided
-    if channels:
-        # Group channels by cluster
-        cluster_channels = {}
-        for i, channel in enumerate(channels):
-            cluster_label = str(labels[i])  # Convert to string for JSON compatibility
-            
-            if cluster_label not in cluster_channels:
-                cluster_channels[cluster_label] = []
-            
-            # Add channel to its cluster
-            cluster_channels[cluster_label].append({
-                'channel_id': channel.get('channel_id'),
-                'title': channel.get('title'),
-                'description': channel.get('description'),
-                'subscriber_count': channel.get('subscriber_count'),
-                'video_count': channel.get('video_count'),
-                
-                # Add 2D coordinates for visualization
-                'x': float(reduced_data[i][0]) if embeddings.shape[1] > 2 else float(embeddings[i][0]),
-                'y': float(reduced_data[i][1]) if embeddings.shape[1] > 2 else float(embeddings[i][1])
-            })
-        
-        clusters['channels'] = cluster_channels
+    # Group channels by cluster
+    for i, label in enumerate(cluster_labels):
+        cluster_key = str(label)
+        if cluster_key not in clusters['channels']:
+            clusters['channels'][cluster_key] = []
+        clusters['channels'][cluster_key].append(channels[i])
     
     return clusters
 
