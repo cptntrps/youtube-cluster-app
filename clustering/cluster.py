@@ -9,12 +9,11 @@ from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 import umap
-import hdbscan
 
 
 def create_clusters(embeddings: np.ndarray, channels: List[Dict], n_clusters: int = 10) -> Dict:
     """
-    Create clusters from channel embeddings using UMAP + HDBSCAN
+    Create clusters from channel embeddings using UMAP + DBSCAN
     Returns a dictionary with cluster assignments and metadata
     """
     # Reduce dimensionality with UMAP
@@ -27,13 +26,12 @@ def create_clusters(embeddings: np.ndarray, channels: List[Dict], n_clusters: in
     )
     reduced_embeddings = umap_reducer.fit_transform(embeddings)
     
-    # Perform HDBSCAN clustering
-    print("Performing HDBSCAN clustering...")
-    clusterer = hdbscan.HDBSCAN(
-        min_cluster_size=5,
-        min_samples=3,
-        metric='euclidean',
-        cluster_selection_method='eom'
+    # Perform DBSCAN clustering
+    print("Performing DBSCAN clustering...")
+    clusterer = DBSCAN(
+        eps=0.5,
+        min_samples=5,
+        metric='euclidean'
     )
     cluster_labels = clusterer.fit_predict(reduced_embeddings)
     
